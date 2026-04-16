@@ -1305,7 +1305,7 @@ tr:hover td{background:rgba(191,161,106,.03);}
 // CONFIG — Change these for production
 // ====================================================
 const CONFIG = {
-  apiUrl: 'delmigos-backend-production.up.railway.app',
+  apiUrl: 'https://delmigos-backend-production.up.railway.app',
   flutterwaveKey: 'FLWPUBK_TEST-8dba4c670ec75a8435fbd689f07c43ed-X',  // Get from dashboard.flutterwave.com
   anthropicKey: '',  // Add your Anthropic key for live AI chat (or use a backend proxy)
   adminPassword: 'delmigos2025',
@@ -1591,12 +1591,38 @@ function initiatePayment(){
       payment_options:selectedPayMethod==='card'?'card':selectedPayMethod==='bank'?'banktransfer':'ussd',
       customer:{email:email,name:fn+' '+ln,phonenumber:phone},
       customizations:{title:CONFIG.hotelName,description:info.roomName+' — '+info.nights+' night(s)',logo:''},
-      callback:function(data){
-        if(data.status==='successful'||data.status==='completed'){
-          saveBooking(ref,info,fn,ln,email,data.transaction_id||'FLW-'+Date.now());
-          showSuccess(ref);
-        }
-      },
+      callback: async function(data) {
+  if (data.status === 'successful' || data.status === 'completed') {
+    // Save to backend database:
+    if (CONFIG.apiUrl) {
+      await fetch(CONFIG.apiUrl + '/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          room: document.getElementById('bm_room')
+                .options[document.getElementById('bm_room').selectedIndex]
+                .text.split('—')[0].trim(),
+          room_price: parseInt(document.getElementById('bm_room').value),
+          checkin: document.getElementById('bm_ci').value,
+          checkout: document.getElementById('bm_co').value,
+          nights: info.nights,
+          guests: document.getElementById('bm_guests').value,
+          amount: info.total,
+          currency: document.getElementById('bm_currency').value,
+          first_name: document.getElementById('bm_fn').value,
+          last_name: document.getElementById('bm_ln').value,
+          email: document.getElementById('bm_email').value,
+          phone: document.getElementById('bm_phone').value,
+          tx_id: data.transaction_id,
+          payment_method: selectedPayMethod,
+          requests: document.getElementById('bm_req').value
+        })
+      }).catch(() => {});
+    }
+    saveBooking(ref, info, fn, ln, email, data.transaction_id || 'FLW-' + Date.now());
+    showSuccess(ref);
+  }
+},
       onclose:function(){console.log('Flutterwave modal closed');}
     });
   }catch(e){demoPaySuccess(ref);}
@@ -1813,9 +1839,35 @@ function renderAllBookings(bkgs){
   </tr>`).join('');
 }
 
-function changeStatus(ref){
-  const s=prompt('Enter new status (Confirmed / Checked In / Pending / Cancelled):');
-  if(s)alert('Status updated to: '+s);
+async function changeStatus(ref) {
+  const s = prompt('Enter new status:\n\nConfirmed\nChecked In\nChecked Out\nPending\nCancelled');
+  if (!s) return;
+
+  const allowed = ['Confirmed','Checked In','Checked Out','Pending','Cancelled'];
+  if (!allowed.includes(s)) {
+    alert('Invalid status. Please type exactly one of the options shown.');
+    return;
+  }
+
+  try {
+    const res = await fetch(CONFIG.apiUrl + '/api/bookings/' + ref + '/status', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (CONFIG.adminSecret || 'delmigos2025')
+      },
+      body: JSON.stringify({ status: s })
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert('✓ Status updated to: ' + s);
+      initAdminDashboard(); // refresh the dashboard
+    } else {
+      alert('Error: ' + (data.error || 'Could not update'));
+    }
+  } catch (err) {
+    alert('Could not connect to backend. Make sure your Railway server is running.');
+  }
 }
 
 function filterTable(q){
